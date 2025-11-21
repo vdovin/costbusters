@@ -16,6 +16,12 @@ export const SAFE_ZONE_DISTANCE = 25; // Meters before enemies spawn
 export const INITIAL_LIVES = 3;
 export const INVINCIBILITY_FRAMES = 60; // Approx 1 second at 60fps
 
+// Shield Power-up
+export const SHIELD_DURATION = 300; // 5 seconds at 60fps
+export const SPAWN_RATE_SHIELD_MIN = 800; // Frames (Rare)
+export const COLOR_SHIELD_ITEM = '#3b82f6'; // Blue Shield Item
+export const COLOR_SHIELD_GLOW = '#facc15'; // Gold Glow for player
+
 // Player
 export const PLAYER_WIDTH = 40;
 export const PLAYER_HEIGHT = 60;
@@ -33,6 +39,7 @@ export const PIT_WIDTH_MAX = 120;
 // Colors
 export const COLOR_PLAYER = '#3B82F6'; // Blue-500
 export const COLOR_ENEMY = '#EF4444'; // Red-500
+export const COLOR_ENEMY_FLYING = '#9333ea'; // Purple-600 for Flying Enemies
 export const COLOR_COIN = '#EAB308'; // Yellow-500
 export const COLOR_PROJECTILE = '#000000'; // Black
 
@@ -50,7 +57,5 @@ export const EXPENSE_LABELS = [
   "НАЛОГ",
   "АРЕНДА",
   "КРЕДИТ",
-  "Е Д А",
-  "ЖКХ",
   "ШТРАФ"
 ];

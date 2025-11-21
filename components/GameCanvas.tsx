@@ -12,6 +12,7 @@ import {
   PLAYER_START_X, 
   COLOR_PLAYER, 
   COLOR_ENEMY, 
+  COLOR_ENEMY_FLYING,
   COLOR_COIN, 
   COLOR_PROJECTILE,
   GAME_SPEED_START,
@@ -28,7 +29,11 @@ import {
   PIT_WIDTH_MIN,
   PIT_WIDTH_MAX,
   INITIAL_LIVES,
-  INVINCIBILITY_FRAMES
+  INVINCIBILITY_FRAMES,
+  SHIELD_DURATION,
+  SPAWN_RATE_SHIELD_MIN,
+  COLOR_SHIELD_ITEM,
+  COLOR_SHIELD_GLOW
 } from '../constants';
 import { 
   GameState, 
@@ -39,7 +44,8 @@ import {
   Particle,
   Entity,
   Pit,
-  Cloud
+  Cloud,
+  Shield
 } from '../types';
 
 interface GameCanvasProps {
@@ -81,11 +87,13 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     markedForDeletion: false,
     lives: INITIAL_LIVES,
     isInvincible: false,
-    invincibilityTimer: 0
+    invincibilityTimer: 0,
+    shieldTimer: 0
   });
   
   const enemiesRef = useRef<Enemy[]>([]);
   const coinsRef = useRef<Coin[]>([]);
+  const shieldsRef = useRef<Shield[]>([]); // New Ref for Shields
   const projectilesRef = useRef<Projectile[]>([]);
   const particlesRef = useRef<Particle[]>([]);
   const pitsRef = useRef<Pit[]>([]);
@@ -97,6 +105,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   // Frame counters for spawning
   const enemySpawnTimer = useRef<number>(0);
   const coinSpawnTimer = useRef<number>(0);
+  const shieldSpawnTimer = useRef<number>(0);
   const pitSpawnTimer = useRef<number>(0);
 
   // Stabilize onGameOver to prevent loop recreation on re-renders
@@ -143,16 +152,19 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       markedForDeletion: false,
       lives: INITIAL_LIVES,
       isInvincible: false,
-      invincibilityTimer: 0
+      invincibilityTimer: 0,
+      shieldTimer: 0
     };
 
     enemiesRef.current = [];
     coinsRef.current = [];
+    shieldsRef.current = [];
     projectilesRef.current = [];
     particlesRef.current = [];
     pitsRef.current = [];
     enemySpawnTimer.current = 0;
     coinSpawnTimer.current = 0;
+    shieldSpawnTimer.current = 0;
     pitSpawnTimer.current = 0;
     
     setScore(0);
@@ -236,6 +248,11 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     player.velocityY += GRAVITY;
     player.y += player.velocityY;
 
+    // Handle Shield Timer
+    if (player.shieldTimer > 0) {
+        player.shieldTimer--;
+    }
+
     // Handle Invincibility Timer
     if (player.invincibilityTimer > 0) {
         player.invincibilityTimer--;
@@ -249,8 +266,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     const isOverPit = pitsRef.current.some(p => playerFootX > p.x && playerFootX < p.x + p.width);
 
     // Ground Collision
-    // Fix: Check if we are "too deep". If we are significantly below GROUND_Y, we are falling to death, don't snap to ground.
-    const isDeepInHole = player.y + player.height > GROUND_Y + 30; // 30px tolerance
+    const isDeepInHole = player.y + player.height > GROUND_Y + 30; 
 
     if (player.y + player.height > GROUND_Y && !isOverPit && !isDeepInHole) {
       player.y = GROUND_Y - player.height;
@@ -259,7 +275,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       player.jumpCount = 0; // Reset jumps on ground
     }
 
-    // Check Death by Falling (Always fatal, ignores lives)
+    // Check Death by Falling (Always fatal, ignores lives and shields)
     if (player.y > CANVAS_HEIGHT) {
          setLives(0);
          setGameState(GameState.GAME_OVER);
@@ -289,7 +305,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     // Enemies
     if (distanceRef.current > SAFE_ZONE_DISTANCE) {
         enemySpawnTimer.current++;
-        // Don't spawn enemies if a pit was just spawned recently (simple heuristic: check last pit x)
+        // Don't spawn enemies if a pit was just spawned recently
         const lastPit = pitsRef.current[pitsRef.current.length - 1];
         const safeToSpawnEnemy = !lastPit || (lastPit.x < CANVAS_WIDTH - 150);
 
@@ -306,6 +322,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                 height: 50,
                 speed: gameSpeedRef.current,
                 label,
+                type: isFlying ? 'FLYING' : 'GROUND',
                 markedForDeletion: false
             });
         }
@@ -330,22 +347,36 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       }
     }
 
+    // Shields (Rare spawn)
+    shieldSpawnTimer.current++;
+    if (shieldSpawnTimer.current > SPAWN_RATE_SHIELD_MIN) {
+        if (Math.random() > 0.8) { // 20% chance after timer interval
+            shieldSpawnTimer.current = 0;
+            shieldsRef.current.push({
+                id: Date.now(),
+                x: CANVAS_WIDTH,
+                y: GROUND_Y - 120, // Floating height
+                width: 30,
+                height: 30,
+                wobbleOffset: Math.random() * Math.PI * 2,
+                markedForDeletion: false
+            });
+        } else {
+            // Reset timer but random offset to avoid predictable pattern if check fails
+            shieldSpawnTimer.current = SPAWN_RATE_SHIELD_MIN - 100; 
+        }
+    }
+
     // 4. Entity Movement & Cleanup
     
     // Environment (Clouds)
     cloudsRef.current.forEach(c => {
-        // Parallax movement: Each cloud moves at a different speed based on its factor
         c.x -= gameSpeedRef.current * c.speedFactor; 
-        
-        // Vertical Oscillation: Sine wave based on time and cloud ID
-        const time = Date.now() / 1000;
-        c.y = c.baseY + Math.sin(time + c.id) * 5;
-
-        // Wrapping
+        c.y = c.baseY + Math.sin(Date.now() / 1000 + c.id) * 5;
         if (c.x + c.width + 50 < 0) {
             c.x = CANVAS_WIDTH + 50;
-            c.baseY = Math.random() * (CANVAS_HEIGHT / 2); // Reposition height slightly on wrap
-            c.y = c.baseY; // Snap to new base
+            c.baseY = Math.random() * (CANVAS_HEIGHT / 2);
+            c.y = c.baseY;
         }
     });
 
@@ -373,6 +404,12 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       if (c.x + c.width < 0) c.markedForDeletion = true;
     });
 
+    // Shields
+    shieldsRef.current.forEach(s => {
+        s.x -= gameSpeedRef.current;
+        if (s.x + s.width < 0) s.markedForDeletion = true;
+    });
+
     // Particles
     particlesRef.current.forEach(p => {
       p.x += p.velocityX;
@@ -383,27 +420,44 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
     // 5. Collision Detection
 
+    // Player vs Shields
+    shieldsRef.current.forEach(shield => {
+        if (!shield.markedForDeletion && checkCollision(player, shield)) {
+            shield.markedForDeletion = true;
+            player.shieldTimer = SHIELD_DURATION; // Activate shield
+            createParticles(shield.x + 15, shield.y + 15, COLOR_SHIELD_GLOW, 10);
+        }
+    });
+
     // Player vs Enemies
     enemiesRef.current.forEach(enemy => {
       if (!enemy.markedForDeletion && checkCollision(player, enemy)) {
         // STOMP LOGIC
         const isFalling = player.velocityY > 0;
-        // Allow stomp if player is roughly above the enemy
         const isAbove = (player.y + player.height) < (enemy.y + enemy.height * 0.7); 
 
         if (isFalling && isAbove) {
             // Successful Stomp
             enemy.markedForDeletion = true;
-            player.velocityY = JUMP_FORCE * 0.8; // Bounce up
-            player.jumpCount = 1; // Allow 1 more jump after bounce
+            player.velocityY = JUMP_FORCE * 0.8; 
+            player.jumpCount = 1; 
             
             scoreRef.current += 20;
             setScore(scoreRef.current);
             
-            createParticles(enemy.x + enemy.width/2, enemy.y + enemy.height/2, COLOR_ENEMY, 15);
+            createParticles(enemy.x + enemy.width/2, enemy.y + enemy.height/2, enemy.type === 'FLYING' ? COLOR_ENEMY_FLYING : COLOR_ENEMY, 15);
         } else {
-            // PLAYER HIT LOGIC
-            if (!player.isInvincible) {
+            // HIT LOGIC
+            // Check if player has SHIELD or INVINCIBILITY
+            if (player.shieldTimer > 0) {
+                // Shield absorbs hit, no damage, no enemy death (or maybe enemy bounce?)
+                // Let's just bounce player back a bit and destroy enemy as a bonus? 
+                // Standard shield behavior: absorb hit, ignore damage. 
+                // Let's destroy enemy to make it powerful
+                enemy.markedForDeletion = true;
+                createParticles(enemy.x + enemy.width/2, enemy.y + enemy.height/2, COLOR_SHIELD_GLOW, 10);
+            } else if (!player.isInvincible) {
+                // TAKE DAMAGE
                 player.lives -= 1;
                 setLives(player.lives);
 
@@ -415,8 +469,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                     // Survived hit
                     player.isInvincible = true;
                     player.invincibilityTimer = INVINCIBILITY_FRAMES;
-                    player.velocityY = -6; // Small bounce back/knockback
-                    createParticles(player.x, player.y, COLOR_ENEMY, 10);
+                    player.velocityY = -6;
+                    createParticles(player.x, player.y, enemy.type === 'FLYING' ? COLOR_ENEMY_FLYING : COLOR_ENEMY, 10);
                 }
             }
         }
@@ -441,7 +495,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           enemy.markedForDeletion = true;
           scoreRef.current += 5;
           setScore(scoreRef.current);
-          createParticles(enemy.x + enemy.width/2, enemy.y + enemy.height/2, COLOR_ENEMY, 10);
+          createParticles(enemy.x + enemy.width/2, enemy.y + enemy.height/2, enemy.type === 'FLYING' ? COLOR_ENEMY_FLYING : COLOR_ENEMY, 10);
         }
       });
     });
@@ -449,6 +503,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     // Filter Deleted
     enemiesRef.current = enemiesRef.current.filter(e => !e.markedForDeletion);
     coinsRef.current = coinsRef.current.filter(c => !c.markedForDeletion);
+    shieldsRef.current = shieldsRef.current.filter(s => !s.markedForDeletion);
     projectilesRef.current = projectilesRef.current.filter(p => !p.markedForDeletion);
     particlesRef.current = particlesRef.current.filter(p => !p.markedForDeletion);
     pitsRef.current = pitsRef.current.filter(p => !p.markedForDeletion);
@@ -466,42 +521,34 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
     // 2. Sun
-    ctx.fillStyle = '#fcd34d'; // Amber 300
+    ctx.fillStyle = '#fcd34d'; 
     ctx.beginPath();
     ctx.arc(CANVAS_WIDTH - 80, 60, 40, 0, Math.PI*2);
     ctx.fill();
-    // Sun Glow
     ctx.fillStyle = 'rgba(253, 224, 71, 0.3)';
     ctx.beginPath();
     ctx.arc(CANVAS_WIDTH - 80, 60, 60, 0, Math.PI*2);
     ctx.fill();
 
-    // 3. Clouds (Parallax & Oscillation)
+    // 3. Clouds
     cloudsRef.current.forEach(c => {
         ctx.globalAlpha = 0.6 + c.speedFactor; 
         ctx.fillStyle = COLOR_CLOUD;
-        
         ctx.beginPath();
         ctx.arc(c.x, c.y, c.height, 0, Math.PI*2);
         ctx.arc(c.x + 20, c.y - 10, c.height * 1.2, 0, Math.PI*2);
         ctx.arc(c.x + 40, c.y, c.height, 0, Math.PI*2);
         ctx.fill();
-        
-        ctx.globalAlpha = 1.0; // Reset
+        ctx.globalAlpha = 1.0; 
     });
 
-    // 4. Background Elements (Parallax) - MOUNTAINS ONLY
-    
-    // Layer 1: Distant Mountains (Purple, very slow)
+    // 4. Background Mountains
     const mountainSpeed = distanceRef.current * 5;
-    ctx.fillStyle = '#a78bfa'; // Violet 400 - soft purple mountains
+    ctx.fillStyle = '#a78bfa';
     ctx.beginPath();
     ctx.moveTo(0, CANVAS_HEIGHT);
-    // Draw sine wave mountains that wrap smoothly
     for(let x = 0; x <= CANVAS_WIDTH; x += 10) {
-        // Create multiple peaks
         const noise = Math.sin((x + mountainSpeed) * 0.005) * 80 + Math.sin((x + mountainSpeed) * 0.01) * 30;
-        // Base height is somewhat low in the background
         const y = CANVAS_HEIGHT - 120 - noise;
         ctx.lineTo(x, y);
     }
@@ -509,48 +556,92 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     ctx.lineTo(0, CANVAS_HEIGHT);
     ctx.fill();
 
-    // 5. Ground with Grass Texture
-    // Bottom Dirt Layer
+    // 5. Ground
     ctx.fillStyle = COLOR_GROUND;
     ctx.fillRect(0, GROUND_Y + 15, CANVAS_WIDTH, CANVAS_HEIGHT - (GROUND_Y + 15));
-
-    // Top Grass Layer
     ctx.fillStyle = COLOR_GRASS;
     ctx.fillRect(0, GROUND_Y, CANVAS_WIDTH, 15);
 
-    // Scrolling Grass Texture (Tufts)
-    ctx.fillStyle = COLOR_GRASS_DARK;
-    const grassOffset = (distanceRef.current * 20) % 40;
-    for(let i = -grassOffset; i < CANVAS_WIDTH; i += 40) {
-        // Draw grass tuft
-        ctx.beginPath();
-        ctx.moveTo(i, GROUND_Y + 15);
-        ctx.lineTo(i + 4, GROUND_Y);
-        ctx.lineTo(i + 8, GROUND_Y + 15);
-        ctx.fill();
-        
-        // Random second blade
-        ctx.beginPath();
-        ctx.moveTo(i + 15, GROUND_Y + 10);
-        ctx.lineTo(i + 18, GROUND_Y + 2);
-        ctx.lineTo(i + 21, GROUND_Y + 10);
-        ctx.fill();
+    // Procedural Grass & Flowers
+    const segmentSize = 20;
+    const scrollPos = distanceRef.current * 20; 
+    const startIdx = Math.floor(scrollPos / segmentSize);
+    const endIdx = startIdx + Math.ceil(CANVAS_WIDTH / segmentSize) + 1;
+
+    for (let i = startIdx; i < endIdx; i++) {
+        const x = (i * segmentSize) - scrollPos;
+        const noise = Math.sin(i * 12.9898 + i * 78.233) * 43758.5453;
+        const rand = noise - Math.floor(noise);
+
+        ctx.fillStyle = COLOR_GRASS_DARK;
+        if (rand > 0.3) {
+            const h = 5 + rand * 8;
+            const w = 3 + rand * 2;
+            const slant = (rand - 0.5) * 5;
+            ctx.beginPath();
+            ctx.moveTo(x, GROUND_Y + 15);
+            ctx.lineTo(x + w/2 + slant, GROUND_Y - h + 10); 
+            ctx.lineTo(x + w, GROUND_Y + 15);
+            ctx.fill();
+        }
+
+        if (rand > 0.92) {
+            ctx.strokeStyle = '#065f46';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(x + 10, GROUND_Y + 15);
+            ctx.lineTo(x + 10, GROUND_Y - 15);
+            ctx.stroke();
+            const flowerType = Math.floor(rand * 100) % 3;
+            ctx.fillStyle = flowerType === 0 ? '#f472b6' : (flowerType === 1 ? '#facc15' : '#ffffff');
+            ctx.beginPath();
+            ctx.arc(x + 10, GROUND_Y - 15, 6, 0, Math.PI * 2); 
+            ctx.fill();
+            ctx.fillStyle = '#451a03';
+            ctx.beginPath();
+            ctx.arc(x + 10, GROUND_Y - 15, 2.5, 0, Math.PI * 2);
+            ctx.fill();
+        }
     }
     
-    // 6. Pits (Drawn over ground to mask it)
-    ctx.fillStyle = COLOR_PIT; // Sky color
+    // 6. Pits
+    ctx.fillStyle = COLOR_PIT; 
     pitsRef.current.forEach(p => {
         ctx.fillRect(p.x, p.y, p.width, p.height);
-        
-        // Optional: Add faint "cloud" in the hole to show it's sky
         ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
         ctx.beginPath();
         ctx.arc(p.x + p.width/2, p.y + 40, 20, 0, Math.PI*2);
         ctx.fill();
-        ctx.fillStyle = COLOR_PIT; // Reset
+        ctx.fillStyle = COLOR_PIT; 
     });
 
     // Draw Entities
+
+    // Shields
+    shieldsRef.current.forEach(s => {
+        const wobble = Math.sin(Date.now() / 200 + s.wobbleOffset) * 5;
+        const y = s.y + wobble;
+        
+        // Shield Shape
+        ctx.fillStyle = COLOR_SHIELD_ITEM;
+        ctx.beginPath();
+        ctx.moveTo(s.x, y);
+        ctx.lineTo(s.x + s.width, y);
+        ctx.lineTo(s.x + s.width, y + s.height/2);
+        ctx.quadraticCurveTo(s.x + s.width/2, y + s.height + 10, s.x, y + s.height/2);
+        ctx.lineTo(s.x, y);
+        ctx.fill();
+        
+        // Inner Detail (Cross)
+        ctx.fillStyle = 'white';
+        ctx.fillRect(s.x + s.width/2 - 3, y + 5, 6, s.height - 15);
+        ctx.fillRect(s.x + 5, y + s.height/2 - 5, s.width - 10, 6);
+        
+        // Border
+        ctx.strokeStyle = '#1e40af';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+    });
 
     // Coins
     ctx.fillStyle = COLOR_COIN;
@@ -571,91 +662,109 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       ctx.fillRect(p.x, p.y, p.width, p.height);
     });
 
-    // Enemies (The Money Bag Monsters)
+    // Enemies
     enemiesRef.current.forEach(e => {
-      // 1. Legs (Dark, thin)
-      ctx.fillStyle = '#1f2937'; // Dark gray
-      const walkOffset = Math.sin(Date.now() / 50) * 5;
-      // Left leg
-      ctx.beginPath();
-      ctx.moveTo(e.x + 15, e.y + 40);
-      ctx.lineTo(e.x + 10 - walkOffset, e.y + 50);
-      ctx.lineTo(e.x + 15 - walkOffset, e.y + 50);
-      ctx.lineTo(e.x + 20, e.y + 40);
-      ctx.fill();
-      // Right leg
-      ctx.beginPath();
-      ctx.moveTo(e.x + 35, e.y + 40);
-      ctx.lineTo(e.x + 40 + walkOffset, e.y + 50);
-      ctx.lineTo(e.x + 45 + walkOffset, e.y + 50);
-      ctx.lineTo(e.x + 40, e.y + 40);
-      ctx.fill();
-
-      // 2. Body (The Bag)
-      ctx.fillStyle = '#d4a373'; // Sack color (Tan)
-      ctx.beginPath();
-      // Main sack body
-      ctx.ellipse(e.x + 25, e.y + 25, 20, 18, 0, 0, Math.PI * 2);
-      ctx.fill();
-
-      // 3. Bag Top (The frill above the tie)
-      ctx.beginPath();
-      ctx.moveTo(e.x + 25, e.y + 10);
-      ctx.lineTo(e.x + 15, e.y);
-      ctx.lineTo(e.x + 35, e.y);
-      ctx.fill();
-
-      // Tie (Rope)
-      ctx.fillStyle = '#4b5563'; // Darker gray for rope
-      ctx.fillRect(e.x + 20, e.y + 8, 10, 3);
-
-      // 4. Face
-      // Eyes (Glowing angry)
-      ctx.fillStyle = '#fbbf24'; // Glowing yellow
-      ctx.beginPath();
-      ctx.ellipse(e.x + 18, e.y + 20, 4, 3, -0.2, 0, Math.PI * 2); // Left
-      ctx.ellipse(e.x + 32, e.y + 20, 4, 3, 0.2, 0, Math.PI * 2); // Right
-      ctx.fill();
-
-      // Mouth (Dark open)
-      ctx.fillStyle = '#111827';
-      ctx.beginPath();
-      ctx.arc(e.x + 25, e.y + 30, 8, 0, Math.PI, false);
-      ctx.fill();
-
-      // Teeth (White sharp)
-      ctx.fillStyle = 'white';
-      ctx.beginPath();
-      ctx.moveTo(e.x + 19, e.y + 30); ctx.lineTo(e.x + 21, e.y + 34); ctx.lineTo(e.x + 23, e.y + 30);
-      ctx.moveTo(e.x + 23, e.y + 30); ctx.lineTo(e.x + 25, e.y + 34); ctx.lineTo(e.x + 27, e.y + 30);
-      ctx.moveTo(e.x + 27, e.y + 30); ctx.lineTo(e.x + 29, e.y + 34); ctx.lineTo(e.x + 31, e.y + 30);
-      ctx.fill();
-
-      // 5. Dollar Sign on Belly
-      ctx.fillStyle = 'rgba(0,0,0,0.2)'; // Subtle dark mark
-      ctx.font = 'bold 16px sans-serif';
-      ctx.fillText('$', e.x + 21, e.y + 38);
-
-      // 6. Arms (Angry gesture)
-      ctx.strokeStyle = '#1f2937';
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      // Left arm
-      ctx.moveTo(e.x + 8, e.y + 25);
-      ctx.lineTo(e.x - 5, e.y + 15); // Raised up
-      // Right arm
-      ctx.moveTo(e.x + 42, e.y + 25);
-      ctx.lineTo(e.x + 55, e.y + 15); // Hand out
-      ctx.stroke();
-
-      // Text Label (Tax/Rent) - Floating above head
+      if (e.type === 'FLYING') {
+          // Flying Enemy (Purple)
+          const flap = Math.sin(Date.now() / 100) * 10;
+          ctx.fillStyle = '#e9d5ff'; 
+          ctx.beginPath();
+          ctx.moveTo(e.x + 10, e.y + 20);
+          ctx.quadraticCurveTo(e.x - 15, e.y + 5 + flap, e.x + 5, e.y + 35);
+          ctx.fill();
+          ctx.beginPath();
+          ctx.moveTo(e.x + 40, e.y + 20);
+          ctx.quadraticCurveTo(e.x + 65, e.y + 5 + flap, e.x + 45, e.y + 35);
+          ctx.fill();
+          ctx.fillStyle = COLOR_ENEMY_FLYING;
+          ctx.beginPath();
+          ctx.ellipse(e.x + 25, e.y + 25, 20, 18, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.beginPath();
+          ctx.moveTo(e.x + 25, e.y + 10);
+          ctx.lineTo(e.x + 15, e.y);
+          ctx.lineTo(e.x + 35, e.y);
+          ctx.fill();
+          ctx.fillStyle = '#581c87';
+          ctx.fillRect(e.x + 20, e.y + 8, 10, 3);
+          ctx.fillStyle = '#facc15';
+          ctx.beginPath();
+          ctx.ellipse(e.x + 18, e.y + 20, 4, 3, -0.2, 0, Math.PI * 2);
+          ctx.ellipse(e.x + 32, e.y + 20, 4, 3, 0.2, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#1f2937';
+          ctx.beginPath();
+          ctx.arc(e.x + 25, e.y + 30, 6, 0, Math.PI, false);
+          ctx.fill();
+          ctx.fillStyle = 'white';
+          ctx.beginPath();
+          ctx.moveTo(e.x + 21, e.y + 30); ctx.lineTo(e.x + 23, e.y + 34); ctx.lineTo(e.x + 25, e.y + 30);
+          ctx.moveTo(e.x + 25, e.y + 30); ctx.lineTo(e.x + 27, e.y + 34); ctx.lineTo(e.x + 29, e.y + 30);
+          ctx.fill();
+          ctx.fillStyle = 'rgba(0,0,0,0.3)';
+          ctx.font = 'bold 16px sans-serif';
+          ctx.fillText('$', e.x + 21, e.y + 38);
+      } else {
+          // Ground Enemy (Tan)
+          ctx.fillStyle = '#1f2937';
+          const walkOffset = Math.sin(Date.now() / 50) * 5;
+          ctx.beginPath();
+          ctx.moveTo(e.x + 15, e.y + 40);
+          ctx.lineTo(e.x + 10 - walkOffset, e.y + 50);
+          ctx.lineTo(e.x + 15 - walkOffset, e.y + 50);
+          ctx.lineTo(e.x + 20, e.y + 40);
+          ctx.fill();
+          ctx.beginPath();
+          ctx.moveTo(e.x + 35, e.y + 40);
+          ctx.lineTo(e.x + 40 + walkOffset, e.y + 50);
+          ctx.lineTo(e.x + 45 + walkOffset, e.y + 50);
+          ctx.lineTo(e.x + 40, e.y + 40);
+          ctx.fill();
+          ctx.fillStyle = '#d4a373';
+          ctx.beginPath();
+          ctx.ellipse(e.x + 25, e.y + 25, 20, 18, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.beginPath();
+          ctx.moveTo(e.x + 25, e.y + 10);
+          ctx.lineTo(e.x + 15, e.y);
+          ctx.lineTo(e.x + 35, e.y);
+          ctx.fill();
+          ctx.fillStyle = '#4b5563';
+          ctx.fillRect(e.x + 20, e.y + 8, 10, 3);
+          ctx.fillStyle = '#fbbf24';
+          ctx.beginPath();
+          ctx.ellipse(e.x + 18, e.y + 20, 4, 3, -0.2, 0, Math.PI * 2);
+          ctx.ellipse(e.x + 32, e.y + 20, 4, 3, 0.2, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#111827';
+          ctx.beginPath();
+          ctx.arc(e.x + 25, e.y + 30, 8, 0, Math.PI, false);
+          ctx.fill();
+          ctx.fillStyle = 'white';
+          ctx.beginPath();
+          ctx.moveTo(e.x + 19, e.y + 30); ctx.lineTo(e.x + 21, e.y + 34); ctx.lineTo(e.x + 23, e.y + 30);
+          ctx.moveTo(e.x + 23, e.y + 30); ctx.lineTo(e.x + 25, e.y + 34); ctx.lineTo(e.x + 27, e.y + 30);
+          ctx.moveTo(e.x + 27, e.y + 30); ctx.lineTo(e.x + 29, e.y + 34); ctx.lineTo(e.x + 31, e.y + 30);
+          ctx.fill();
+          ctx.fillStyle = 'rgba(0,0,0,0.2)';
+          ctx.font = 'bold 16px sans-serif';
+          ctx.fillText('$', e.x + 21, e.y + 38);
+          ctx.strokeStyle = '#1f2937';
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.moveTo(e.x + 8, e.y + 25);
+          ctx.lineTo(e.x - 5, e.y + 15);
+          ctx.moveTo(e.x + 42, e.y + 25);
+          ctx.lineTo(e.x + 55, e.y + 15);
+          ctx.stroke();
+      }
       ctx.fillStyle = 'white';
       ctx.font = 'bold 10px sans-serif';
       ctx.textAlign = 'center';
       ctx.shadowColor = "black";
       ctx.shadowBlur = 2;
       ctx.fillText(e.label, e.x + 25, e.y - 5);
-      ctx.shadowBlur = 0; // Reset shadow
+      ctx.shadowBlur = 0;
     });
 
     // Player (Slava)
@@ -665,85 +774,81 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     const pH = player.height;
     const isGrounded = player.y === GROUND_Y - player.height;
 
-    // INVINCIBILITY EFFECT
-    if (player.isInvincible) {
-        // Flash effect: lower opacity rapidly
+    // SHIELD EFFECT (Gold flicker)
+    if (player.shieldTimer > 0) {
+        if (Math.floor(Date.now() / 50) % 2 === 0) {
+            ctx.globalAlpha = 1.0;
+            // Gold Glow Halo
+            ctx.shadowColor = COLOR_SHIELD_GLOW;
+            ctx.shadowBlur = 20;
+        } else {
+            // Slightly bright overlay
+            ctx.fillStyle = COLOR_SHIELD_GLOW;
+        }
+    } 
+    // HIT INVINCIBILITY EFFECT (Transparent flicker)
+    else if (player.isInvincible) {
         if (Math.floor(Date.now() / 50) % 2 === 0) {
             ctx.globalAlpha = 0.5;
         }
     }
 
-    // 1. Legs (Dark Blue Suit Pants)
+    // 1. Legs
     ctx.fillStyle = '#1e3a8a';
     if (isGrounded) {
-        // Running animation
         const legSwing = Math.sin(Date.now() / 50) * 12;
-        ctx.fillRect(pX + 5 + legSwing, pY + pH - 20, 10, 20); // Leg 1
-        ctx.fillRect(pX + 25 - legSwing, pY + pH - 20, 10, 20); // Leg 2
+        ctx.fillRect(pX + 5 + legSwing, pY + pH - 20, 10, 20);
+        ctx.fillRect(pX + 25 - legSwing, pY + pH - 20, 10, 20);
     } else {
-        // Jumping pose
         ctx.fillRect(pX + 5, pY + pH - 15, 10, 15); 
         ctx.fillRect(pX + 25, pY + pH - 25, 10, 15);
     }
 
-    // 2. Body (Navy Blue Jacket)
-    ctx.fillStyle = '#172554'; // Darker blue
+    // 2. Body
+    ctx.fillStyle = '#172554';
     ctx.fillRect(pX, pY + 20, pW, 30);
-
-    // White Shirt triangle
     ctx.fillStyle = 'white';
     ctx.beginPath();
     ctx.moveTo(pX + pW/2, pY + 45);
     ctx.lineTo(pX + 10, pY + 20);
     ctx.lineTo(pX + pW - 10, pY + 20);
     ctx.fill();
-
-    // Light Blue Tie
     ctx.fillStyle = '#60a5fa';
     ctx.fillRect(pX + pW/2 - 3, pY + 20, 6, 18);
-
-    // Star Badge (Boss)
-    ctx.fillStyle = '#facc15'; // Yellow
+    ctx.fillStyle = '#facc15';
     ctx.beginPath();
     ctx.arc(pX + pW - 12, pY + 28, 4, 0, Math.PI * 2);
     ctx.fill();
 
-    // 3. Head (Skin Tone)
+    // 3. Head
     ctx.fillStyle = '#fca5a5';
     ctx.fillRect(pX + 4, pY, pW - 8, 22);
-
-    // Beard (Brown)
     ctx.fillStyle = '#78350f';
     ctx.fillRect(pX + 4, pY + 12, pW - 8, 10);
-    
-    // Mouth/Smile
     ctx.fillStyle = 'white';
     ctx.fillRect(pX + 14, pY + 15, 12, 3);
-    // Gold tooth
     ctx.fillStyle = '#facc15';
     ctx.fillRect(pX + 20, pY + 15, 3, 3);
-
-    // Eyes
     ctx.fillStyle = '#0f172a';
     ctx.fillRect(pX + 10, pY + 6, 4, 4);
     ctx.fillRect(pX + 26, pY + 6, 4, 4);
 
-    // 4. Red Hat (MAGA style)
-    ctx.fillStyle = '#dc2626'; // Red
-    ctx.fillRect(pX + 2, pY - 6, pW - 4, 10); // Dome
-    ctx.fillRect(pX + 2, pY + 2, pW + 6, 4); // Visor
-    // Text lines on hat
+    // 4. Hat
+    ctx.fillStyle = '#dc2626';
+    ctx.fillRect(pX + 2, pY - 6, pW - 4, 10);
+    ctx.fillRect(pX + 2, pY + 2, pW + 6, 4);
     ctx.fillStyle = 'white';
     ctx.fillRect(pX + 8, pY - 3, 24, 2);
 
-    // 5. Thumbs Up Hand (if not shooting)
-    ctx.fillStyle = '#fca5a5'; // Skin
+    // 5. Hand
+    ctx.fillStyle = '#fca5a5';
     const handY = pY + 30 + (isGrounded ? Math.cos(Date.now() / 50) * 2 : -5);
-    ctx.fillRect(pX + 32, handY, 10, 10); // Hand blob
-    ctx.fillRect(pX + 34, handY - 4, 4, 6); // Thumb up
+    ctx.fillRect(pX + 32, handY, 10, 10);
+    ctx.fillRect(pX + 34, handY - 4, 4, 6);
 
-    // Reset Opacity
+    // Reset Effects
     ctx.globalAlpha = 1.0;
+    ctx.shadowBlur = 0;
 
     // Particles
     particlesRef.current.forEach(p => {
@@ -755,29 +860,24 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       ctx.globalAlpha = 1.0;
     });
 
-    // Request Next Frame
     frameIdRef.current = requestAnimationFrame(loop);
   }, [gameState, setGameState, setScore, setDistance, setLives]); 
 
-  // Effect 1: Handle Reset when entering PLAYING state
   useEffect(() => {
       if (gameState === GameState.PLAYING) {
           resetGame();
       }
   }, [gameState, resetGame]);
 
-  // Effect 2: Start Loop when PLAYING
   useEffect(() => {
     if (gameState === GameState.PLAYING) {
       frameIdRef.current = requestAnimationFrame(loop);
     } else {
       cancelAnimationFrame(frameIdRef.current);
     }
-
     return () => cancelAnimationFrame(frameIdRef.current);
   }, [gameState, loop]);
 
-  // Keyboard Listeners
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       keysPressed.current[e.code] = true;
@@ -790,21 +890,18 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         }
       }
     };
-
     const handleKeyUp = (e: KeyboardEvent) => {
       keysPressed.current[e.code] = false;
     };
-
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
-
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
   }, [gameState, handleJump, handleShoot]);
 
-  // Initial draw (background)
+  // Initial Draw
   useEffect(() => {
       if (gameState === GameState.MENU && canvasRef.current) {
           const ctx = canvasRef.current.getContext('2d');
@@ -814,8 +911,6 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             gradient.addColorStop(1, COLOR_SKY_BOTTOM); 
             ctx.fillStyle = gradient;
             ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-            
-            // Initial static ground draw
             ctx.fillStyle = COLOR_GROUND;
             ctx.fillRect(0, GROUND_Y + 15, CANVAS_WIDTH, CANVAS_HEIGHT - (GROUND_Y + 15));
             ctx.fillStyle = COLOR_GRASS;

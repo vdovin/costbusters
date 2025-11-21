@@ -23,6 +23,10 @@ export interface Cloud extends Entity {
   baseY: number;
 }
 
+export interface Shield extends Entity {
+  wobbleOffset: number;
+}
+
 export interface Player extends Entity {
   velocityY: number;
   isJumping: boolean;
@@ -32,11 +36,13 @@ export interface Player extends Entity {
   lives: number;
   isInvincible: boolean;
   invincibilityTimer: number;
+  shieldTimer: number; // Timer for the Shield power-up
 }
 
 export interface Enemy extends Entity {
   speed: number;
   label: string; // e.g., "TAX", "RENT"
+  type: 'GROUND' | 'FLYING'; // New property to distinguish behavior/look
 }
 
 export interface Coin extends Entity {
