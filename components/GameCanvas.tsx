@@ -571,21 +571,91 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       ctx.fillRect(p.x, p.y, p.width, p.height);
     });
 
-    // Enemies
+    // Enemies (The Money Bag Monsters)
     enemiesRef.current.forEach(e => {
-      ctx.fillStyle = COLOR_ENEMY;
-      ctx.fillRect(e.x, e.y, e.width, e.height);
-      
-      // Text Label
+      // 1. Legs (Dark, thin)
+      ctx.fillStyle = '#1f2937'; // Dark gray
+      const walkOffset = Math.sin(Date.now() / 50) * 5;
+      // Left leg
+      ctx.beginPath();
+      ctx.moveTo(e.x + 15, e.y + 40);
+      ctx.lineTo(e.x + 10 - walkOffset, e.y + 50);
+      ctx.lineTo(e.x + 15 - walkOffset, e.y + 50);
+      ctx.lineTo(e.x + 20, e.y + 40);
+      ctx.fill();
+      // Right leg
+      ctx.beginPath();
+      ctx.moveTo(e.x + 35, e.y + 40);
+      ctx.lineTo(e.x + 40 + walkOffset, e.y + 50);
+      ctx.lineTo(e.x + 45 + walkOffset, e.y + 50);
+      ctx.lineTo(e.x + 40, e.y + 40);
+      ctx.fill();
+
+      // 2. Body (The Bag)
+      ctx.fillStyle = '#d4a373'; // Sack color (Tan)
+      ctx.beginPath();
+      // Main sack body
+      ctx.ellipse(e.x + 25, e.y + 25, 20, 18, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 3. Bag Top (The frill above the tie)
+      ctx.beginPath();
+      ctx.moveTo(e.x + 25, e.y + 10);
+      ctx.lineTo(e.x + 15, e.y);
+      ctx.lineTo(e.x + 35, e.y);
+      ctx.fill();
+
+      // Tie (Rope)
+      ctx.fillStyle = '#4b5563'; // Darker gray for rope
+      ctx.fillRect(e.x + 20, e.y + 8, 10, 3);
+
+      // 4. Face
+      // Eyes (Glowing angry)
+      ctx.fillStyle = '#fbbf24'; // Glowing yellow
+      ctx.beginPath();
+      ctx.ellipse(e.x + 18, e.y + 20, 4, 3, -0.2, 0, Math.PI * 2); // Left
+      ctx.ellipse(e.x + 32, e.y + 20, 4, 3, 0.2, 0, Math.PI * 2); // Right
+      ctx.fill();
+
+      // Mouth (Dark open)
+      ctx.fillStyle = '#111827';
+      ctx.beginPath();
+      ctx.arc(e.x + 25, e.y + 30, 8, 0, Math.PI, false);
+      ctx.fill();
+
+      // Teeth (White sharp)
+      ctx.fillStyle = 'white';
+      ctx.beginPath();
+      ctx.moveTo(e.x + 19, e.y + 30); ctx.lineTo(e.x + 21, e.y + 34); ctx.lineTo(e.x + 23, e.y + 30);
+      ctx.moveTo(e.x + 23, e.y + 30); ctx.lineTo(e.x + 25, e.y + 34); ctx.lineTo(e.x + 27, e.y + 30);
+      ctx.moveTo(e.x + 27, e.y + 30); ctx.lineTo(e.x + 29, e.y + 34); ctx.lineTo(e.x + 31, e.y + 30);
+      ctx.fill();
+
+      // 5. Dollar Sign on Belly
+      ctx.fillStyle = 'rgba(0,0,0,0.2)'; // Subtle dark mark
+      ctx.font = 'bold 16px sans-serif';
+      ctx.fillText('$', e.x + 21, e.y + 38);
+
+      // 6. Arms (Angry gesture)
+      ctx.strokeStyle = '#1f2937';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      // Left arm
+      ctx.moveTo(e.x + 8, e.y + 25);
+      ctx.lineTo(e.x - 5, e.y + 15); // Raised up
+      // Right arm
+      ctx.moveTo(e.x + 42, e.y + 25);
+      ctx.lineTo(e.x + 55, e.y + 15); // Hand out
+      ctx.stroke();
+
+      // Text Label (Tax/Rent) - Floating above head
       ctx.fillStyle = 'white';
       ctx.font = 'bold 10px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(e.label, e.x + e.width/2, e.y + e.height/2 + 4);
-
-      // "Angry" Eyes
-      ctx.fillStyle = 'black';
-      ctx.fillRect(e.x + 10, e.y + 10, 8, 8);
-      ctx.fillRect(e.x + 32, e.y + 10, 8, 8);
+      ctx.shadowColor = "black";
+      ctx.shadowBlur = 2;
+      ctx.fillText(e.label, e.x + 25, e.y - 5);
+      ctx.shadowBlur = 0; // Reset shadow
     });
 
     // Player (Slava)

@@ -80,27 +80,27 @@ export default function App() {
         {/* UI Overlay: Main Menu */}
         {gameState === GameState.MENU && (
           <div className="absolute inset-0 bg-sky-900/90 flex flex-col items-center justify-center text-center p-4 backdrop-blur-sm z-10">
-            <div className="mb-4 animate-bounce">
-                <h1 className="text-5xl md:text-6xl font-black text-white stroke-2 stroke-black pixel-font tracking-tighter drop-shadow-[0_4px_4px_rgba(0,0,0,0.5)]">
+            <div className="mb-2 animate-bounce">
+                <h1 className="text-4xl md:text-6xl font-black text-white stroke-2 stroke-black pixel-font tracking-tighter drop-shadow-[0_4px_4px_rgba(0,0,0,0.5)]">
                 COST<br/>BUSTERS
                 </h1>
             </div>
             
-            <p className="text-sky-100 text-sm md:text-base mb-6 max-w-md leading-relaxed font-bold px-4">
+            <p className="text-sky-100 text-xs md:text-sm mb-4 max-w-md leading-relaxed font-bold px-4">
               Помоги Славе собрать зарплату, уничтожить расходы и перепрыгнуть долги!
             </p>
 
-            <div className="bg-sky-800/50 p-3 rounded-lg border border-sky-700/50 mb-6 max-w-xs w-full">
-                <h3 className="text-sky-200 text-xs font-bold mb-2 uppercase tracking-widest flex items-center justify-center gap-2">
+            <div className="bg-sky-800/50 p-3 rounded-lg border border-sky-700/50 mb-4 max-w-xs w-full">
+                <h3 className="text-sky-200 text-[10px] md:text-xs font-bold mb-1 uppercase tracking-widest flex items-center justify-center gap-2">
                     <Info className="w-3 h-3"/> Управление
                 </h3>
-                <div className="grid grid-cols-2 gap-2 text-left text-xs">
+                <div className="grid grid-cols-2 gap-2 text-left text-[10px] md:text-xs">
                     <div className="flex items-center gap-2">
-                        <kbd className="px-2 py-1 bg-sky-950 rounded border-b-2 border-sky-900 font-mono text-white text-xs">SPACE</kbd>
+                        <kbd className="px-2 py-0.5 bg-sky-950 rounded border-b-2 border-sky-900 font-mono text-white">SPACE</kbd>
                         <span className="text-sky-100">Прыжок</span>
                     </div>
                     <div className="flex items-center gap-2">
-                        <kbd className="px-2 py-1 bg-sky-950 rounded border-b-2 border-sky-900 font-mono text-white text-xs">F</kbd>
+                        <kbd className="px-2 py-0.5 bg-sky-950 rounded border-b-2 border-sky-900 font-mono text-white">F</kbd>
                         <span className="text-sky-100">Выстрел</span>
                     </div>
                 </div>
@@ -108,9 +108,9 @@ export default function App() {
 
             <button 
               onClick={startGame}
-              className="group relative inline-flex items-center justify-center px-6 py-3 font-bold text-white transition-all duration-200 bg-yellow-500 text-base md:text-lg rounded-full hover:bg-yellow-400 hover:scale-105 hover:shadow-[0_0_20px_rgba(234,179,8,0.5)] focus:outline-none ring-offset-2 focus:ring-2 ring-yellow-400 text-shadow shadow-xl"
+              className="group relative inline-flex items-center justify-center px-6 py-2 md:py-3 font-bold text-white transition-all duration-200 bg-yellow-500 text-sm md:text-base rounded-full hover:bg-yellow-400 hover:scale-105 hover:shadow-[0_0_20px_rgba(234,179,8,0.5)] focus:outline-none ring-offset-2 focus:ring-2 ring-yellow-400 text-shadow shadow-xl"
             >
-              <Play className="w-5 h-5 mr-2 fill-current" />
+              <Play className="w-4 h-4 md:w-5 md:h-5 mr-2 fill-current" />
               НАЧАТЬ ИГРУ
             </button>
           </div>
