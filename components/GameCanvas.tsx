@@ -5,13 +5,14 @@ import {
   CANVAS_HEIGHT, 
   GRAVITY, 
   JUMP_FORCE, 
+  MAX_JUMPS,
   GROUND_Y, 
   PLAYER_WIDTH, 
   PLAYER_HEIGHT, 
   PLAYER_START_X, 
   COLOR_PLAYER, 
   COLOR_ENEMY, 
-  COLOR_COIN,
+  COLOR_COIN, 
   COLOR_PROJECTILE,
   GAME_SPEED_START,
   EXPENSE_LABELS,
@@ -19,11 +20,15 @@ import {
   COLOR_SKY_TOP,
   COLOR_SKY_BOTTOM,
   COLOR_GROUND,
+  COLOR_GRASS,
+  COLOR_GRASS_DARK,
   COLOR_PIT,
   COLOR_CLOUD,
   SPAWN_RATE_PITS_MIN,
   PIT_WIDTH_MIN,
-  PIT_WIDTH_MAX
+  PIT_WIDTH_MAX,
+  INITIAL_LIVES,
+  INVINCIBILITY_FRAMES
 } from '../constants';
 import { 
   GameState, 
@@ -33,7 +38,8 @@ import {
   Projectile, 
   Particle,
   Entity,
-  Pit
+  Pit,
+  Cloud
 } from '../types';
 
 interface GameCanvasProps {
@@ -41,6 +47,7 @@ interface GameCanvasProps {
   setGameState: (state: GameState) => void;
   setScore: (score: number) => void;
   setDistance: (dist: number) => void;
+  setLives: (lives: number) => void;
   onGameOver: (finalScore: number) => void;
 }
 
@@ -49,6 +56,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   setGameState, 
   setScore, 
   setDistance,
+  setLives,
   onGameOver 
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -68,8 +76,12 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     height: PLAYER_HEIGHT,
     velocityY: 0,
     isJumping: false,
+    jumpCount: 0,
     color: COLOR_PLAYER,
-    markedForDeletion: false
+    markedForDeletion: false,
+    lives: INITIAL_LIVES,
+    isInvincible: false,
+    invincibilityTimer: 0
   });
   
   const enemiesRef = useRef<Enemy[]>([]);
@@ -77,7 +89,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   const projectilesRef = useRef<Projectile[]>([]);
   const particlesRef = useRef<Particle[]>([]);
   const pitsRef = useRef<Pit[]>([]);
-  const cloudsRef = useRef<Entity[]>([]);
+  const cloudsRef = useRef<Cloud[]>([]);
   
   // Input Refs
   const keysPressed = useRef<{ [key: string]: boolean }>({});
@@ -95,14 +107,17 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
   // Initialize Clouds
   useEffect(() => {
-      const initialClouds: Entity[] = [];
-      for(let i=0; i<5; i++) {
+      const initialClouds: Cloud[] = [];
+      for(let i=0; i<8; i++) {
+          const y = Math.random() * (CANVAS_HEIGHT / 2);
           initialClouds.push({
               id: i,
               x: Math.random() * CANVAS_WIDTH,
-              y: Math.random() * (CANVAS_HEIGHT / 2),
+              y: y,
+              baseY: y,
               width: 60 + Math.random() * 100,
               height: 30 + Math.random() * 30,
+              speedFactor: 0.1 + Math.random() * 0.2, // Random speed for parallax depth
               markedForDeletion: false
           });
       }
@@ -123,8 +138,12 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       height: PLAYER_HEIGHT,
       velocityY: 0,
       isJumping: false,
+      jumpCount: 0,
       color: COLOR_PLAYER,
-      markedForDeletion: false
+      markedForDeletion: false,
+      lives: INITIAL_LIVES,
+      isInvincible: false,
+      invincibilityTimer: 0
     };
 
     enemiesRef.current = [];
@@ -138,16 +157,19 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     
     setScore(0);
     setDistance(0);
-  }, [setScore, setDistance]);
+    setLives(INITIAL_LIVES);
+  }, [setScore, setDistance, setLives]);
 
   // Handle Input
   const handleJump = useCallback(() => {
-    // Only allow jump if on ground (simple check: not jumping)
-    // Or if checking strict ground collision
-    if (!playerRef.current.isJumping) {
-      playerRef.current.velocityY = JUMP_FORCE;
-      playerRef.current.isJumping = true;
-      createParticles(playerRef.current.x + PLAYER_WIDTH/2, playerRef.current.y + PLAYER_HEIGHT, '#cbd5e1', 5);
+    const p = playerRef.current;
+    // Allow jump if not jumping (grounded) OR if jump count is less than max jumps
+    if (!p.isJumping || p.jumpCount < MAX_JUMPS) {
+      p.velocityY = JUMP_FORCE;
+      p.isJumping = true;
+      p.jumpCount++; // Increment jump count
+      
+      createParticles(p.x + PLAYER_WIDTH/2, p.y + PLAYER_HEIGHT, '#cbd5e1', 5);
     }
   }, []);
 
@@ -214,6 +236,14 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     player.velocityY += GRAVITY;
     player.y += player.velocityY;
 
+    // Handle Invincibility Timer
+    if (player.invincibilityTimer > 0) {
+        player.invincibilityTimer--;
+        if (player.invincibilityTimer <= 0) {
+            player.isInvincible = false;
+        }
+    }
+
     // Check for Pits
     const playerFootX = player.x + player.width / 2; // Center of player
     const isOverPit = pitsRef.current.some(p => playerFootX > p.x && playerFootX < p.x + p.width);
@@ -226,10 +256,12 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       player.y = GROUND_Y - player.height;
       player.velocityY = 0;
       player.isJumping = false;
+      player.jumpCount = 0; // Reset jumps on ground
     }
 
-    // Check Death by Falling
+    // Check Death by Falling (Always fatal, ignores lives)
     if (player.y > CANVAS_HEIGHT) {
+         setLives(0);
          setGameState(GameState.GAME_OVER);
          onGameOverRef.current(scoreRef.current);
          return; // Stop loop
@@ -302,10 +334,18 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     
     // Environment (Clouds)
     cloudsRef.current.forEach(c => {
-        c.x -= gameSpeedRef.current * 0.2; // Parallax
-        if (c.x + c.width < 0) {
-            c.x = CANVAS_WIDTH;
-            c.y = Math.random() * (CANVAS_HEIGHT / 2);
+        // Parallax movement: Each cloud moves at a different speed based on its factor
+        c.x -= gameSpeedRef.current * c.speedFactor; 
+        
+        // Vertical Oscillation: Sine wave based on time and cloud ID
+        const time = Date.now() / 1000;
+        c.y = c.baseY + Math.sin(time + c.id) * 5;
+
+        // Wrapping
+        if (c.x + c.width + 50 < 0) {
+            c.x = CANVAS_WIDTH + 50;
+            c.baseY = Math.random() * (CANVAS_HEIGHT / 2); // Reposition height slightly on wrap
+            c.y = c.baseY; // Snap to new base
         }
     });
 
@@ -346,9 +386,40 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     // Player vs Enemies
     enemiesRef.current.forEach(enemy => {
       if (!enemy.markedForDeletion && checkCollision(player, enemy)) {
-        setGameState(GameState.GAME_OVER);
-        onGameOverRef.current(scoreRef.current);
-        createParticles(player.x, player.y, COLOR_PLAYER, 20);
+        // STOMP LOGIC
+        const isFalling = player.velocityY > 0;
+        // Allow stomp if player is roughly above the enemy
+        const isAbove = (player.y + player.height) < (enemy.y + enemy.height * 0.7); 
+
+        if (isFalling && isAbove) {
+            // Successful Stomp
+            enemy.markedForDeletion = true;
+            player.velocityY = JUMP_FORCE * 0.8; // Bounce up
+            player.jumpCount = 1; // Allow 1 more jump after bounce
+            
+            scoreRef.current += 20;
+            setScore(scoreRef.current);
+            
+            createParticles(enemy.x + enemy.width/2, enemy.y + enemy.height/2, COLOR_ENEMY, 15);
+        } else {
+            // PLAYER HIT LOGIC
+            if (!player.isInvincible) {
+                player.lives -= 1;
+                setLives(player.lives);
+
+                if (player.lives <= 0) {
+                    setGameState(GameState.GAME_OVER);
+                    onGameOverRef.current(scoreRef.current);
+                    createParticles(player.x, player.y, COLOR_PLAYER, 20);
+                } else {
+                    // Survived hit
+                    player.isInvincible = true;
+                    player.invincibilityTimer = INVINCIBILITY_FRAMES;
+                    player.velocityY = -6; // Small bounce back/knockback
+                    createParticles(player.x, player.y, COLOR_ENEMY, 10);
+                }
+            }
+        }
       }
     });
 
@@ -405,50 +476,79 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     ctx.arc(CANVAS_WIDTH - 80, 60, 60, 0, Math.PI*2);
     ctx.fill();
 
-    // 3. Clouds
-    ctx.fillStyle = COLOR_CLOUD;
+    // 3. Clouds (Parallax & Oscillation)
     cloudsRef.current.forEach(c => {
+        ctx.globalAlpha = 0.6 + c.speedFactor; 
+        ctx.fillStyle = COLOR_CLOUD;
+        
         ctx.beginPath();
         ctx.arc(c.x, c.y, c.height, 0, Math.PI*2);
         ctx.arc(c.x + 20, c.y - 10, c.height * 1.2, 0, Math.PI*2);
         ctx.arc(c.x + 40, c.y, c.height, 0, Math.PI*2);
         ctx.fill();
+        
+        ctx.globalAlpha = 1.0; // Reset
     });
 
-    // 4. Cityscape Background (Parallax)
-    ctx.fillStyle = '#94a3b8'; // Slate 400
-    const cityOffset = (distanceRef.current * 20) % 200;
-    // Simple buildings
-    for (let i = 0; i < CANVAS_WIDTH + 200; i += 50) {
-        const h = 40 + Math.sin(i) * 20 + Math.cos(i * 0.5) * 30;
-        ctx.fillRect(i - cityOffset, GROUND_Y - h, 55, h);
-    }
-
-    // 5. Ground
-    ctx.fillStyle = COLOR_GROUND;
-    ctx.fillRect(0, GROUND_Y, CANVAS_WIDTH, CANVAS_HEIGHT - GROUND_Y);
+    // 4. Background Elements (Parallax) - MOUNTAINS ONLY
     
-    // 6. Pits
-    ctx.fillStyle = COLOR_PIT;
-    pitsRef.current.forEach(p => {
-        ctx.fillRect(p.x, p.y, p.width, p.height);
-    });
-
-    // Floor details (stripes on non-pit ground)
-    // Simple optimization: just draw stripes everywhere, pits will cover them if drawn after? 
-    // No, Pits are drawn ON TOP of ground (black rects). 
-    // Stripes should be drawn BEFORE pits.
-    ctx.fillStyle = '#334155'; // Darker stripe
-    const stripeOffset = (Date.now() / 2) % 100;
-    for (let i = 0; i < CANVAS_WIDTH + 100; i += 100) {
-      ctx.fillRect(i - stripeOffset, GROUND_Y + 5, 40, 20);
+    // Layer 1: Distant Mountains (Purple, very slow)
+    const mountainSpeed = distanceRef.current * 5;
+    ctx.fillStyle = '#a78bfa'; // Violet 400 - soft purple mountains
+    ctx.beginPath();
+    ctx.moveTo(0, CANVAS_HEIGHT);
+    // Draw sine wave mountains that wrap smoothly
+    for(let x = 0; x <= CANVAS_WIDTH; x += 10) {
+        // Create multiple peaks
+        const noise = Math.sin((x + mountainSpeed) * 0.005) * 80 + Math.sin((x + mountainSpeed) * 0.01) * 30;
+        // Base height is somewhat low in the background
+        const y = CANVAS_HEIGHT - 120 - noise;
+        ctx.lineTo(x, y);
     }
-    // Re-draw Pits to cover stripes
-    ctx.fillStyle = COLOR_PIT;
+    ctx.lineTo(CANVAS_WIDTH, CANVAS_HEIGHT);
+    ctx.lineTo(0, CANVAS_HEIGHT);
+    ctx.fill();
+
+    // 5. Ground with Grass Texture
+    // Bottom Dirt Layer
+    ctx.fillStyle = COLOR_GROUND;
+    ctx.fillRect(0, GROUND_Y + 15, CANVAS_WIDTH, CANVAS_HEIGHT - (GROUND_Y + 15));
+
+    // Top Grass Layer
+    ctx.fillStyle = COLOR_GRASS;
+    ctx.fillRect(0, GROUND_Y, CANVAS_WIDTH, 15);
+
+    // Scrolling Grass Texture (Tufts)
+    ctx.fillStyle = COLOR_GRASS_DARK;
+    const grassOffset = (distanceRef.current * 20) % 40;
+    for(let i = -grassOffset; i < CANVAS_WIDTH; i += 40) {
+        // Draw grass tuft
+        ctx.beginPath();
+        ctx.moveTo(i, GROUND_Y + 15);
+        ctx.lineTo(i + 4, GROUND_Y);
+        ctx.lineTo(i + 8, GROUND_Y + 15);
+        ctx.fill();
+        
+        // Random second blade
+        ctx.beginPath();
+        ctx.moveTo(i + 15, GROUND_Y + 10);
+        ctx.lineTo(i + 18, GROUND_Y + 2);
+        ctx.lineTo(i + 21, GROUND_Y + 10);
+        ctx.fill();
+    }
+    
+    // 6. Pits (Drawn over ground to mask it)
+    ctx.fillStyle = COLOR_PIT; // Sky color
     pitsRef.current.forEach(p => {
         ctx.fillRect(p.x, p.y, p.width, p.height);
+        
+        // Optional: Add faint "cloud" in the hole to show it's sky
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+        ctx.beginPath();
+        ctx.arc(p.x + p.width/2, p.y + 40, 20, 0, Math.PI*2);
+        ctx.fill();
+        ctx.fillStyle = COLOR_PIT; // Reset
     });
-
 
     // Draw Entities
 
@@ -494,6 +594,14 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     const pW = player.width;
     const pH = player.height;
     const isGrounded = player.y === GROUND_Y - player.height;
+
+    // INVINCIBILITY EFFECT
+    if (player.isInvincible) {
+        // Flash effect: lower opacity rapidly
+        if (Math.floor(Date.now() / 50) % 2 === 0) {
+            ctx.globalAlpha = 0.5;
+        }
+    }
 
     // 1. Legs (Dark Blue Suit Pants)
     ctx.fillStyle = '#1e3a8a';
@@ -564,6 +672,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     ctx.fillRect(pX + 32, handY, 10, 10); // Hand blob
     ctx.fillRect(pX + 34, handY - 4, 4, 6); // Thumb up
 
+    // Reset Opacity
+    ctx.globalAlpha = 1.0;
+
     // Particles
     particlesRef.current.forEach(p => {
       ctx.globalAlpha = p.life;
@@ -576,7 +687,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
     // Request Next Frame
     frameIdRef.current = requestAnimationFrame(loop);
-  }, [gameState, setGameState, setScore, setDistance]); 
+  }, [gameState, setGameState, setScore, setDistance, setLives]); 
 
   // Effect 1: Handle Reset when entering PLAYING state
   useEffect(() => {
@@ -634,8 +745,11 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             ctx.fillStyle = gradient;
             ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
             
+            // Initial static ground draw
             ctx.fillStyle = COLOR_GROUND;
-            ctx.fillRect(0, GROUND_Y, CANVAS_WIDTH, CANVAS_HEIGHT - GROUND_Y);
+            ctx.fillRect(0, GROUND_Y + 15, CANVAS_WIDTH, CANVAS_HEIGHT - (GROUND_Y + 15));
+            ctx.fillStyle = COLOR_GRASS;
+            ctx.fillRect(0, GROUND_Y, CANVAS_WIDTH, 15);
           }
       }
   }, [gameState]);

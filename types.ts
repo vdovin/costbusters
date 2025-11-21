@@ -1,3 +1,4 @@
+
 export interface Position {
   x: number;
   y: number;
@@ -17,10 +18,20 @@ export interface Pit extends Entity {
   // Pit specific properties if any
 }
 
+export interface Cloud extends Entity {
+  speedFactor: number;
+  baseY: number;
+}
+
 export interface Player extends Entity {
   velocityY: number;
   isJumping: boolean;
+  jumpCount: number; // Added to track number of jumps (0, 1, 2)
   color: string;
+  // New properties for Lives & Invincibility
+  lives: number;
+  isInvincible: boolean;
+  invincibilityTimer: number;
 }
 
 export interface Enemy extends Entity {
